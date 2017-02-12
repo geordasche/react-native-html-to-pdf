@@ -1,5 +1,6 @@
 package com.parkerdan.htmltopdf;
 
+import com.facebook.react.bridge.Arguments;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactContext;
 import com.facebook.react.bridge.ReactContextBaseJavaModule;
@@ -12,10 +13,13 @@ import java.io.FileOutputStream;
 import java.io.OutputStream;
 import java.io.InputStream;
 import java.io.ByteArrayInputStream;
+import java.util.UUID;
 
+import com.facebook.react.bridge.WritableMap;
 import com.itextpdf.text.Document;
 import com.itextpdf.text.Paragraph;
 import com.itextpdf.text.pdf.PdfWriter;
+import com.itextpdf.text.pdf.codec.Base64;
 import com.itextpdf.tool.xml.XMLWorkerHelper;
 
 import android.os.Environment;
@@ -39,51 +43,72 @@ public class RNHTMLtoPDFModule extends ReactContextBaseJavaModule {
   @ReactMethod
   public void convert(final ReadableMap options, final Promise promise) {
     try {
+      File destinationFile;
+      String htmlString = options.hasKey("html") ? options.getString("html") : null;
+      if (htmlString == null) return;
 
-      String htmlString = options.getString("html");
+      String fileName;
+      if (options.hasKey("fileName")) {
+        fileName = options.getString("fileName");
+      } else {
+        fileName = UUID.randomUUID().toString();
+      }
 
-      String filePath = getFilePath(htmlString);
+      if (options.hasKey("directory") && options.getString("directory").equals("docs")) {
+        File path = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), Environment.DIRECTORY_DOCUMENTS);
+        if (!path.exists()) path.mkdir();
+        destinationFile = new File(path, fileName + ".pdf");
+      } else {
+        destinationFile = getTempFile(fileName);
+      }
 
-      promise.resolve(filePath);
+      String filePath = convertToPDF(htmlString, destinationFile);
+      String base64 = "";
 
+      if (options.hasKey("base64") && options.getBoolean("base64") == true) {
+        base64 = Base64.encodeFromFile(filePath);
+      }
+
+      WritableMap resultMap = Arguments.createMap();
+      resultMap.putString("filePath", filePath);
+      resultMap.putString("base64", base64);
+
+      promise.resolve(resultMap);
     } catch (Exception e) {
       promise.reject(e.getMessage());
     }
   }
 
-  private String getFilePath(String htmlString) throws Exception {
-
-    File path = new File(Environment.getExternalStorageDirectory(), Environment.DIRECTORY_DOCUMENTS);
-
-    if ( !path.exists() ) {
-      path.mkdir();
-    }
-
-    File file = new File(path, "MyPdf.pdf");
-
+  private String convertToPDF(String htmlString, File file) throws Exception {
     try {
-      String html = "<html><head></head><body>" + htmlString + "</body></html>";
-
       Document doc = new Document();
-
-      InputStream in = new ByteArrayInputStream(html.getBytes());
+      InputStream in = new ByteArrayInputStream(htmlString.getBytes());
 
       PdfWriter pdf = PdfWriter.getInstance(doc, new FileOutputStream(file));
 
       doc.open();
-
       XMLWorkerHelper.getInstance().parseXHtml(pdf, doc,in);
-
       doc.close();
-
       in.close();
 
       String absolutePath = file.getAbsolutePath();
 
       return absolutePath;
-
     } catch (Exception e) {
-      throw new Exception();
+      throw new Exception(e);
     }
   }
+
+  private File getTempFile(String fileName) throws Exception {
+    try {
+      File outputDir = getReactApplicationContext().getCacheDir();
+      File outputFile = File.createTempFile("PDF_" + UUID.randomUUID().toString(), ".pdf", outputDir);
+
+      return outputFile;
+
+    } catch (Exception e) {
+      throw new Exception(e);
+    }
+  }
+
 }
